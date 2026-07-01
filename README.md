@@ -1,306 +1,395 @@
-# ML_AI_imperial_capstone_project
+# Bayesian Optimisation for Black-Box Functions
 
-This repository contains the code, analysis, and supporting materials for my capstone project completed as part of the Machine Learning and Artificial Intelligence Professional Certificate at Imperial College London.
+This repository contains the code, analysis, and supporting material for my capstone project for the **Machine Learning and Artificial Intelligence Professional Certificate at Imperial College London**.
 
-## 1. Project overview
+The project investigates how **Bayesian optimisation** can be used to maximise an unknown, expensive-to-evaluate objective function under a limited query budget.
 
-This project tackles a **black-box optimisation (BBO)** problem. The objective function is unknown, can only be evaluated by querying selected input points, and returns a scalar output that must be used to guide future decisions. The goal is to use a limited number of expensive evaluations to identify high-performing inputs as efficiently as possible.
+## Project overview
 
-Black-box optimisation is important in many practical settings, including hyperparameter tuning, scientific simulation, engineering design, and experimental optimisation. In these problems, the function often has no closed-form expression, gradients are unavailable, and each evaluation may be expensive. As a result, the optimiser must make careful use of all previously collected information.
+In black-box optimisation, the objective function is not available in closed form. It can only be evaluated by selecting an input and observing the corresponding scalar output. Gradients are unavailable, and each evaluation may be costly.
 
-This project is useful to me because it combines several important ideas from machine learning and data science:
+The central task is therefore to use all previously observed data to choose the next evaluation point efficiently.
 
-- probabilistic surrogate modelling
-- optimisation under uncertainty
-- sequential decision-making
-- model diagnostics and visualisation
+This setting appears in applications such as:
 
-## 2. Inputs and outputs
+- hyperparameter tuning;
+- scientific simulation;
+- engineering design;
+- experimental optimisation; and
+- other sequential decision-making problems with expensive evaluations.
 
-For each hidden function, the optimiser receives previously evaluated input-output pairs.
+The project combines:
 
-If the observed inputs are written as
+- probabilistic surrogate modelling;
+- optimisation under uncertainty;
+- acquisition-function design;
+- geometric analysis of the observed inputs; and
+- model diagnostics and visualisation.
 
-$$
-X = \{\mathbf{x}_1,\dots,\mathbf{x}_n\},
-$$
+## Problem formulation
 
-and the corresponding observed outputs as
-
-$$
-\mathbf{y} = (y_1,\dots,y_n)^\top,
-$$
-
-then the task is to use this information to propose a new query point
+For each hidden objective function, the optimiser receives a set of observed input-output pairs,
 
 $$
-\mathbf{x}_{\mathrm{next}}
+\mathcal{D}_n
+=
+\left\{
+(\mathbf{x}_i,y_i)
+\right\}_{i=1}^{n},
 $$
 
-that is likely to improve on the best result seen so far.
+where
 
-The function itself is never observed directly. Its structure must be inferred from the sampled data alone.
+$$
+\mathbf{x}_i \in \mathcal{X} \subseteq \mathbb{R}^{d}
+$$
 
-## 3. Challenge objective
+is an evaluated input and
 
-The aim is to identify input locations that **maximise** the hidden objective while working under a limited query budget.
+$$
+y_i = f(\mathbf{x}_i) + \varepsilon_i
+$$
 
-This creates a standard exploration-exploitation trade-off:
+is the corresponding observed output.
 
-- **exploration**: sample uncertain or less-visited regions to learn more about the function
-- **exploitation**: sample regions that already appear promising
+The aim is to choose a new query point,
 
-A good black-box optimisation strategy must balance these two goals efficiently.
+$$
+\mathbf{x}_{n+1},
+$$
 
-## 4. Current technical approach
+that is likely to improve on the best value observed so far while using the remaining evaluation budget effectively.
 
-My current method is based on **Gaussian process regression (GPR)** as a surrogate model for the unknown objective function.
+This requires balancing two competing objectives:
 
-A Gaussian process is well suited to black-box optimisation because it provides, for each candidate point \(\mathbf{x}\),
+- **Exploration:** evaluate uncertain or sparsely sampled regions to learn more about the objective.
+- **Exploitation:** evaluate regions that already appear likely to produce high objective values.
 
-- a **posterior mean** \(\mu(\mathbf{x})\), representing the predicted objective value
-- a **posterior standard deviation** \(\sigma(\mathbf{x})\), representing predictive uncertainty
+## Methodology
 
-This makes it possible to use both predicted performance and uncertainty when selecting the next query.
+### 1. Input preprocessing
 
-### 4.1 Input preprocessing
-
-The input coordinates are scaled before fitting the Gaussian process so that dimensions are treated more comparably during modelling. If \(\mathbf{x} = (x_1,\dots,x_d)\), the scaled input coordinates are written as
+Each input dimension is scaled to a comparable range before fitting the surrogate model. For a bounded input coordinate \(x_j\),
 
 $$
 x_j^{\mathrm{scaled}}
 =
-\frac{x_j - x_j^{\min}}{x_j^{\max} - x_j^{\min}},
-\qquad j=1,\dots,d.
+\frac{x_j-x_j^{\min}}
+{x_j^{\max}-x_j^{\min}},
+\qquad
+j=1,\ldots,d.
 $$
 
-This improves numerical stability and helps prevent one coordinate from dominating purely because of scale.
+This transformation improves numerical conditioning and prevents dimensions with larger numerical ranges from dominating the kernel distance calculation.
 
-### 4.2 Gaussian process surrogate model
+### 2. Gaussian process surrogate
 
-The latent objective is modelled as
+The unknown objective is modelled using **Gaussian process regression (GPR)**,
 
 $$
-f(\mathbf{x}) \sim \mathcal{GP}\!\left(0,\,k(\mathbf{x},\mathbf{x}')\right).
+f(\mathbf{x})
+\sim
+\mathcal{GP}
+\left(
+m(\mathbf{x}),
+k(\mathbf{x},\mathbf{x}')
+\right).
 $$
 
-The kernel currently used is an RBF-based kernel with a noise term,
+The current implementation uses an RBF covariance function with an additive white-noise term,
 
 $$
 k(\mathbf{x},\mathbf{x}')
 =
 \sigma_f^2
-\exp\!\left(
--\frac{\|\mathbf{x}-\mathbf{x}'\|^2}{2\ell^2}
+\exp
+\left(
+-\frac{\lVert\mathbf{x}-\mathbf{x}'\rVert^2}
+{2\ell^2}
 \right)
 +
-\sigma_n^2 \delta_{\mathbf{x},\mathbf{x}'},
+\sigma_n^2
+\delta_{\mathbf{x},\mathbf{x}'},
 $$
 
 where:
 
-- \(\sigma_f^2\) is the signal variance
-- \(\ell\) is the kernel length scale
-- \(\sigma_n^2\) is the observation noise variance
-- \(\delta_{\mathbf{x},\mathbf{x}'}\) is the Kronecker delta
+- \(\sigma_f^2\) is the signal variance;
+- \(\ell\) is the kernel length scale;
+- \(\sigma_n^2\) is the observation-noise variance; and
+- \(\delta_{\mathbf{x},\mathbf{x}'}\) is the Kronecker delta.
 
-In implementation terms, this corresponds to a kernel of the form
+In `scikit-learn`, this is represented by a kernel of the form:
+
+```python
+ConstantKernel() * RBF() + WhiteKernel()
+```
+
+The Gaussian process provides both:
+
+- a posterior mean \(\mu(\mathbf{x})\), representing the predicted objective value; and
+- a posterior standard deviation \(\sigma(\mathbf{x})\), representing predictive uncertainty.
+
+These quantities allow the optimiser to account for both expected performance and uncertainty when selecting the next point.
+
+### 3. Hyperparameter learning
+
+The kernel hyperparameters are learned from the observed data by maximising the **log marginal likelihood**.
+
+For kernel hyperparameters \(\theta\), define the covariance matrix
 
 $$
-\text{ConstantKernel} \times \text{RBF} + \text{WhiteKernel}.
-$$
-
-### 4.3 Hyperparameter learning via log marginal likelihood
-
-An important refinement in my current workflow is that I no longer manually sweep over assumed noise levels. Instead, the Gaussian process learns its own hyperparameters directly from the data by maximising the **log marginal likelihood**.
-
-If the kernel depends on hyperparameters \(\theta\), then the covariance matrix over the observed inputs is
-
-$$
-K_\theta(X,X)
+K_{\theta}
 =
-\bigl[k(\mathbf{x}_i,\mathbf{x}_j)\bigr]_{i,j=1}^n.
+\left[
+k_{\theta}(\mathbf{x}_i,\mathbf{x}_j)
+\right]_{i,j=1}^{n}.
 $$
 
-The hyperparameters are chosen by maximising
+The log marginal likelihood is
 
 $$
 \log p(\mathbf{y}\mid X,\theta)
 =
--\frac{1}{2}\mathbf{y}^\top K_\theta^{-1}\mathbf{y}
--\frac{1}{2}\log|K_\theta|
--\frac{n}{2}\log(2\pi).
+-\frac{1}{2}
+\mathbf{y}^{\mathsf{T}}
+K_{\theta}^{-1}
+\mathbf{y}
+-\frac{1}{2}
+\log\lvert K_{\theta}\rvert
+-\frac{n}{2}
+\log(2\pi).
 $$
 
 This objective balances:
 
-- fit to the observed data
-- model complexity
-- probabilistic consistency of the GP model
+- agreement with the observed data;
+- model complexity; and
+- the probabilistic consistency of the surrogate model.
 
-In practice, this optimisation is carried out internally by `GaussianProcessRegressor.fit(...)`, with multiple optimiser restarts to reduce the chance of a poor local optimum.
+The optimisation is performed internally by `GaussianProcessRegressor.fit(...)`. Multiple optimiser restarts are used to reduce sensitivity to poor local optima.
 
-### 4.4 Posterior prediction
+### 4. Posterior prediction
 
-Once fitted, the GP provides a posterior mean and posterior covariance at candidate inputs \(X_*\):
+At a set of candidate inputs \(X_*\), the Gaussian process produces the posterior mean
 
 $$
 \mu(X_*)
 =
-K(X_*,X)\,K(X,X)^{-1}\mathbf{y},
+K(X_*,X)
+K(X,X)^{-1}
+\mathbf{y},
 $$
+
+and posterior covariance
 
 $$
 \Sigma(X_*)
 =
 K(X_*,X_*)
 -
-K(X_*,X)\,K(X,X)^{-1}K(X,X_*).
+K(X_*,X)
+K(X,X)^{-1}
+K(X,X_*).
 $$
 
-The uncertainty used in the acquisition functions is the posterior standard deviation
+The predictive uncertainty used by the acquisition functions is
 
 $$
 \sigma(\mathbf{x})
 =
-\sqrt{\operatorname{Var}(f(\mathbf{x})\mid X,\mathbf{y})}.
+\sqrt{
+\operatorname{Var}
+\left[
+f(\mathbf{x})
+\mid
+X,\mathbf{y}
+\right]
+}.
 $$
 
-## 5. Acquisition functions
+In practice, the implementation uses the numerically stable linear-algebra routines provided by `scikit-learn` rather than forming matrix inverses explicitly.
 
-To choose candidate next points, I evaluate three standard Bayesian optimisation acquisition functions.
+## Acquisition functions
 
-### 5.1 Upper Confidence Bound (UCB)
+The current workflow compares three standard acquisition functions.
+
+### Upper Confidence Bound
+
+For a maximisation problem,
 
 $$
 a_{\mathrm{UCB}}(\mathbf{x})
 =
-\mu(\mathbf{x}) + \beta\,\sigma(\mathbf{x}),
+\mu(\mathbf{x})
++
+\kappa\sigma(\mathbf{x}),
 $$
 
-where \(\beta > 0\) controls the exploration-exploitation trade-off.
+where \(\kappa>0\) controls the strength of exploration.
 
-### 5.2 Expected Improvement (EI)
+A larger value of \(\kappa\) places more emphasis on uncertain regions, while a smaller value favours exploitation.
+
+### Expected Improvement
 
 Let
 
 $$
-f_{\mathrm{best}} = \max_{1\le i\le n} y_i.
+f_{\mathrm{best}}
+=
+\max_{1\leq i\leq n} y_i
 $$
 
-Then define
+be the best observed objective value. Define
 
 $$
 Z(\mathbf{x})
 =
-\frac{\mu(\mathbf{x}) - f_{\mathrm{best}} - \xi}{\sigma(\mathbf{x})}.
+\frac{
+\mu(\mathbf{x})
+-
+f_{\mathrm{best}}
+-
+\xi
+}{
+\sigma(\mathbf{x})
+},
 $$
+
+where \(\xi\geq 0\) controls the desired improvement margin.
 
 The expected improvement is
 
 $$
 a_{\mathrm{EI}}(\mathbf{x})
 =
-\bigl(\mu(\mathbf{x}) - f_{\mathrm{best}} - \xi\bigr)\Phi(Z(\mathbf{x}))
+\left(
+\mu(\mathbf{x})
+-
+f_{\mathrm{best}}
+-
+\xi
+\right)
+\Phi\!\left(Z(\mathbf{x})\right)
 +
-\sigma(\mathbf{x})\phi(Z(\mathbf{x})),
+\sigma(\mathbf{x})
+\phi\!\left(Z(\mathbf{x})\right),
 $$
 
-where \(\Phi\) and \(\phi\) are the standard normal CDF and PDF.
+where \(\Phi\) and \(\phi\) are the standard normal cumulative distribution function and probability density function, respectively.
 
-### 5.3 Probability of Improvement (PI)
+When \(\sigma(\mathbf{x})=0\), the expected improvement is set to zero.
+
+### Probability of Improvement
 
 Using the same definition of \(Z(\mathbf{x})\),
 
 $$
 a_{\mathrm{PI}}(\mathbf{x})
 =
-\Phi(Z(\mathbf{x})).
+\Phi\!\left(Z(\mathbf{x})\right).
 $$
 
-These acquisition functions encode different trade-offs between exploitation and exploration. In practice, I inspect all three, though a cleaner long-term strategy is likely to choose one main acquisition rule and keep the others as comparisons.
+Probability of Improvement is intuitive, but it does not account for the magnitude of a possible improvement. For that reason, Expected Improvement is a stronger candidate for the primary acquisition rule, while UCB and PI remain useful comparison baselines.
 
-## 6. Additional structure learning: PCA and SVM filtering
+## PCA and SVM candidate filtering
 
-Alongside the GP, I also analyse the geometry of the observed input cloud using **principal component analysis (PCA)**.
+An optional candidate-filtering stage is used alongside the Gaussian process.
 
-If \(X\) is the scaled input matrix, PCA projects it into a lower-dimensional representation,
+The scaled input matrix is projected onto its leading principal components,
 
 $$
-X_{\mathrm{PCA}} = XW,
+X_{\mathrm{PCA}}
+=
+\widetilde{X}W,
 $$
 
-where the columns of \(W\) are the leading principal directions.
+where \(\widetilde{X}\) is the centred input matrix and the columns of \(W\) contain the leading principal directions.
 
-I currently use the first two principal components to visualise the sampled region and to define a coarse promising-region model. Observed outputs are thresholded to label higher-performing points, and an RBF-kernel SVM is then fitted in the 2D PCA space. This gives a simple classifier for regions that appear more promising based on the current observations.
+The first two principal components are used to:
 
-The purpose of this step is not to replace the Gaussian process, but to add additional structure to candidate generation by restricting attention to regions that appear potentially useful.
+1. visualise the geometry of the observed inputs;
+2. label a subset of observations as relatively high-performing; and
+3. fit an RBF-kernel support vector classifier in the reduced space.
 
-## 7. Workflow summary
+The classifier provides a coarse estimate of regions that appear promising. Candidate points can then be sampled from these regions, mapped back to the original input space, and scored using the Gaussian-process acquisition functions.
 
-For each hidden function, the current workflow is:
+This stage is a heuristic candidate-generation mechanism rather than a replacement for the Gaussian process. Because a two-dimensional PCA projection may discard information relevant to the objective, its effect should be evaluated against a simpler GP-only baseline.
+
+## Optimisation workflow
+
+For each hidden objective function, the current workflow is:
 
 1. Load the observed input-output pairs.
 2. Scale the input coordinates.
 3. Fit a Gaussian process with learnable kernel hyperparameters.
-4. Learn the kernel length scale, signal variance, and noise level by maximising the log marginal likelihood.
-5. Evaluate the GP posterior mean and uncertainty on a candidate set.
-6. Use PCA to visualise the observed input geometry.
-7. Threshold outputs and fit an SVM in PCA space to identify a coarse promising region.
-8. Sample candidates from that region and map them back to the original input space.
-9. Evaluate UCB, EI, and PI on candidate points to propose the next query.
+4. Estimate the signal variance, length scale, and noise level by maximising the log marginal likelihood.
+5. Generate a set of candidate inputs.
+6. Evaluate the Gaussian-process posterior mean and uncertainty at each candidate.
+7. Optionally use PCA and SVM classification to restrict candidate generation to a coarse promising region.
+8. Score the candidates using UCB, Expected Improvement, and Probability of Improvement.
+9. Select the candidate that maximises the chosen acquisition function.
+10. Submit the selected point as the next query.
 
-## 8. Libraries and tools used
+## Libraries
 
-The main Python libraries used in this project are:
+The main Python libraries used in the project are:
 
-- **NumPy** for numerical array operations
-- **pandas** for organising and handling data
-- **scikit-learn** for Gaussian process regression, PCA, and SVM models
-- **Matplotlib** for plotting surrogate predictions, uncertainty, PCA projections, and diagnostics
+- **NumPy** for numerical array operations;
+- **pandas** for data organisation and manipulation;
+- **scikit-learn** for Gaussian process regression, PCA, scaling, and SVM classification; and
+- **Matplotlib** for visualisation and diagnostic plots.
 
-These libraries were appropriate because the project focuses on relatively small datasets, interpretable modelling, and fast iteration rather than large-scale deep learning training.
+These libraries are appropriate for the relatively small datasets and interpretable modelling workflow used in this project.
 
-## 9. Current strengths of the method
+## Current strengths
 
-The main strengths of the current approach are:
+The current approach:
 
-- it uses a **probabilistic surrogate model** rather than relying on purely heuristic search
-- it incorporates **uncertainty estimates** directly into the optimisation process
-- it avoids manual noise sweeps by learning GP hyperparameters from data
-- it adds a **geometric structure-learning step** through PCA and SVM filtering
-- it remains relatively interpretable and easy to inspect visually
+- uses a probabilistic surrogate rather than a purely heuristic search strategy;
+- incorporates predictive uncertainty directly into the optimisation process;
+- learns Gaussian-process hyperparameters from the observed data;
+- supports multiple acquisition strategies;
+- includes an optional geometric candidate-filtering stage; and
+- remains interpretable through posterior, acquisition, and PCA diagnostics.
 
-## 10. Possible improvements and future work
+## Limitations
 
-There are several directions that could improve the current workflow.
+The current implementation also has several limitations:
 
-- Use **adaptive output transformations** depending on the objective, for example raw outputs, standardisation, or `arcsinh` / signed-log transforms for extreme dynamic ranges.
-- Replace the isotropic RBF kernel with an **ARD kernel**, allowing a separate length scale in each input dimension.
-- Compare **RBF and Matérn kernels** to test whether a less smooth prior improves surrogate performance.
-- Use **Expected Improvement (EI)** as the main acquisition function, while keeping UCB and PI as comparison baselines.
-- Make the exploration parameters **adaptive across rounds**, for example reducing \(\beta\) or \(\xi\) as more data is collected.
-- Add a **diversity penalty** or minimum-distance rule to avoid proposing points too close to existing observations.
-- Replace purely uniform random candidate generation with **Sobol sequences** or **Latin hypercube sampling** for better coverage of the search space.
-- Optimise the acquisition function more directly, for example using **multi-start local optimisation** after an initial Monte Carlo screening step.
-- Improve the PCA/SVM stage by using **adaptive thresholds** or probabilistic success labels rather than a fixed percentile cutoff.
-- Run **ablation studies** to test whether the PCA/SVM filtering stage genuinely improves performance compared with a simpler GP-only BO baseline.
-- Combine the classifier and acquisition function into a **hybrid acquisition rule**, for example
-  $$
-  a_{\mathrm{hybrid}}(\mathbf{x}) = \mathrm{EI}(\mathbf{x})\,p(\text{promising}\mid \mathbf{x}),
-  $$
-  so that search is guided by both GP uncertainty and a learned promising-region score.
-- Track more diagnostics, such as best value so far, uncertainty at selected points, and distance to previous samples, to better understand optimisation behaviour across rounds.
+- an isotropic RBF kernel assumes the same characteristic length scale in every input dimension;
+- the surrogate may be sensitive to extreme output ranges or outliers;
+- random candidate generation may leave parts of the search space poorly covered;
+- the PCA/SVM filter may remove useful regions if the projection or classification threshold is misleading;
+- comparing several acquisition functions without a fixed selection rule can make the optimisation policy inconsistent; and
+- performance has not yet been fully established through systematic ablation studies.
 
-## 11. Repository documentation plan
+## Planned improvements
 
-To make the reasoning behind the project clear to peers, facilitators, and future employers, I plan to document the workflow in several layers:
+Planned extensions include:
 
-- a high-level explanation in this README
-- clear comments and markdown explanations in notebooks
-- visual diagnostics showing how the GP and acquisition functions behave
-- references to the main Bayesian optimisation ideas that motivated the design
+- applying adaptive output transformations, such as standardisation, `arcsinh`, or signed-log transforms;
+- replacing the isotropic RBF kernel with an automatic relevance determination kernel using one length scale per input dimension;
+- comparing RBF and Matérn kernels;
+- adopting Expected Improvement as the primary acquisition function;
+- adapting \(\kappa\) or \(\xi\) as the query budget is consumed;
+- enforcing a minimum distance from previously evaluated points;
+- replacing uniform random candidates with Sobol sequences or Latin hypercube sampling;
+- optimising the acquisition function using multi-start local optimisation after an initial global screening stage;
+- using adaptive or probabilistic labels in the PCA/SVM stage;
+- testing the PCA/SVM filter against a GP-only baseline;
+- evaluating hybrid acquisition rules such as
 
-## 12. Ongoing development
+$$
+a_{\mathrm{hybrid}}(\mathbf{x})
+=
+a_{\mathrm{EI}}(\mathbf{x})
+\,p(\text{promising}\mid\mathbf{x});
+$$
 
-This project is still evolving. I am continuing to refine the surrogate model, investigate acquisition behaviour, and explore whether ideas from more advanced Bayesian optimisation methods can be integrated into the current pipeline while keeping the method interpretable and reproducible.
+- tracking best-so-far performance, selected-point uncertainty, candidate diversity, and distance from previous observations; and
+- adding reproducible experiments with fixed random seeds and clearly recorded optimisation settings.
+
+## Project status
+
+This project is under active development. Current work focuses on refining the surrogate model, improving acquisition optimisation, evaluating the value of the PCA/SVM filtering stage, and making the overall workflow more reproducible.
